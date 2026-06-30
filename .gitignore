@@ -6,6 +6,9 @@ __pycache__/
 # Generated experiment outputs and model adapters.
 runs/
 
+# Hugging Face cache/model downloads.
+.hfcache/
+
 # Local working context, not public project documentation.
 CLAUDE.md
 

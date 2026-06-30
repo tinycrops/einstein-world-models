@@ -33,14 +33,26 @@ from ewm.chess_traces import gold_trace
 from ewm.grpo import group_advantages
 from ewm.hf_policy import (encode_trajectory, sample_trajectory,
                            token_logprobs)
-from ewm.reward import world_use_penalty
+from ewm.reward import info_shaped_world_reward, world_use_penalty
 
 MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 LAM = 0.25
 
+# reward shaping config, set in main() from CLI flags
+REWARD = {"mode": "flat", "lam_info": 0.25, "lam_cost": 0.10, "budget": 2}
+
 
 def reward_of(rec, trace):
-    return verify(rec, trace.final_answer) + world_use_penalty(trace.n_world_calls, lam=LAM)
+    """r_M for a trajectory. mode='flat' = paper's budget penalty; mode='info' =
+    r_W shaped by the puzzle's MEASURED info gain (rec['info_gain'], in bits), so
+    a world-call is paid exactly its worth (see ewm.reward.info_shaped_world_reward)."""
+    ans = verify(rec, trace.final_answer)
+    if REWARD["mode"] == "info":
+        ig = float(rec.get("info_gain", 0.0))
+        return ans + info_shaped_world_reward(
+            trace.n_world_calls, ig, REWARD["lam_info"], REWARD["lam_cost"],
+            REWARD["budget"])
+    return ans + world_use_penalty(trace.n_world_calls, lam=LAM, budget=REWARD["budget"])
 
 
 def light_sft(model, tok, recs, dev, epochs, lr=2e-4):
@@ -130,8 +142,19 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--beta", type=float, default=0.1, help="KL-to-SFT-reference weight")
     ap.add_argument("--model", default=MODEL, help="HF reasoner policy to fine-tune")
+    ap.add_argument("--reward", choices=["flat", "info"], default="flat",
+                    help="flat = paper budget penalty; info = r_W shaped by measured IG")
+    ap.add_argument("--lam-info", type=float, default=0.25)
+    ap.add_argument("--lam-cost", type=float, default=0.10)
+    ap.add_argument("--corpus", default=None,
+                    help="corpus jsonl; defaults to labeled for --reward info")
+    ap.add_argument("--ntest", type=int, default=30)
+    ap.add_argument("--train-cap", type=int, default=0,
+                    help="cap #train puzzles (0 = all); keeps GRPO tractable")
     args = ap.parse_args()
     model_id = args.model
+    REWARD["mode"] = args.reward
+    REWARD["lam_info"], REWARD["lam_cost"] = args.lam_info, args.lam_cost
 
     from peft import LoraConfig, get_peft_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -139,17 +162,31 @@ def main() -> int:
     random.seed(0); torch.manual_seed(0)
 
     import json
-    corpus_path = ROOT / "data" / "chess_corpus.jsonl"
+    default_corpus = ("data/chess_corpus_large_labeled.jsonl" if args.reward == "info"
+                      else "data/chess_corpus_large.jsonl")
+    corpus_path = ROOT / (args.corpus or default_corpus)
+    if not corpus_path.exists():
+        corpus_path = ROOT / "data" / "chess_corpus.jsonl"
     if corpus_path.exists():
         recs = [json.loads(l) for l in corpus_path.read_text().splitlines() if l.strip()]
-        print(f"loaded corpus from {corpus_path}")
+        print(f"loaded corpus from {corpus_path} (reward={args.reward})")
     else:
         print("generating scaled corpus...")
         recs = generate(n_mate=16, n_factual=12, seed=11, max_plies=3)
         corpus_path.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
+    if args.reward == "info" and not all("info_gain" in r for r in recs):
+        raise SystemExit("--reward info needs an IG-labeled corpus "
+                         "(run scripts/label_infogain.py first)")
     random.shuffle(recs)
-    ntest = 10
+    ntest = args.ntest
     test, train = recs[:ntest], recs[ntest:]
+    if args.train_cap and len(train) > args.train_cap:
+        # keep the test/train split fixed across reward arms (seed=0) but cap the
+        # train set so the A/B is tractable; balance call/no-call within the cap.
+        nv = [r for r in train if r["needs_visual"]][:args.train_cap // 2]
+        fac = [r for r in train if not r["needs_visual"]][:args.train_cap - len(nv)]
+        train = nv + fac
+        random.shuffle(train)
     print(f"corpus {len(recs)}: {len(train)} train / {len(test)} test "
           f"({sum(r['needs_visual'] for r in train)} tactical in train)")
 

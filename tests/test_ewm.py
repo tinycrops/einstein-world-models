@@ -85,6 +85,32 @@ def test_world_penalty_and_total():
     assert reward.ewm_reward("Paris", "Paris", 2) > reward.ewm_reward("x", "Paris", 0)
 
 
+def test_info_shaped_world_reward_rewards_paying_calls():
+    # high-IG (tactical) puzzle: calling pays its bits -> positive r_W.
+    hi = reward.info_shaped_world_reward(1, info_gain_bits=2.0, lam_info=0.25, lam_cost=0.10)
+    assert hi > 0
+    # factual (IG ~ 0): the call only costs -> net negative -> discourage calling.
+    lo = reward.info_shaped_world_reward(1, info_gain_bits=0.0, lam_info=0.25, lam_cost=0.10)
+    assert lo < 0
+    # not calling forfeits the bonus but pays no cost.
+    assert reward.info_shaped_world_reward(0, info_gain_bits=2.0) == 0.0
+    # a call on a high-IG puzzle should beat a call on a factual one.
+    assert hi > lo
+
+
+def test_info_shaped_penalises_uninformative_rollout():
+    # a rollout that REMOVES information (IG<0) makes the call doubly bad.
+    bad = reward.info_shaped_world_reward(1, info_gain_bits=-1.0)
+    assert bad < reward.info_shaped_world_reward(1, info_gain_bits=0.0)
+
+
+def test_ewm_reward_shaped_combines_answer_and_shaped_call():
+    # correct + a call that paid its bits > wrong + an unpaid call.
+    good = reward.ewm_reward_shaped("Qg3", "Qg3", 1, info_gain_bits=2.0)
+    bad = reward.ewm_reward_shaped("x", "Qg3", 1, info_gain_bits=0.0)
+    assert good > bad
+
+
 # ---- grpo -----------------------------------------------------------------
 def test_group_advantages_zero_mean():
     adv = grpo.group_advantages([1.0, 0.0, 0.0, 1.0])

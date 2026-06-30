@@ -1,0 +1,5 @@
+FROM spark-ngpt-llama-tribe-lab:latest
+# §3.1 Simulator world-module W + python-chess for search/verify.
+RUN apt-get update && apt-get install -y stockfish && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir chess
+# transformers 5.12 (base image) is kept; the chess/SFT/GRPO track uses no diffusers.

@@ -165,6 +165,71 @@ class ChessWorldModule:
         return Rollout(query=query, frame_paths=frame_paths, beats=[san_line],
                        seconds=round(time.time() - t0, 2), module=self.module, text=text)
 
+    def counterfactual_rollout(self, out_dir: Path, remove_square: str,
+                               fen: str | None = None) -> Rollout:
+        """Intervention rollout (borrowed from VOID's counterfactual framing):
+        'if the piece on `remove_square` were not there, what follows?'
+
+        VOID removes an object and renders the physics consequence; the chess
+        analogue removes a piece (a defender, a blocker) and re-runs the engine
+        line on the modified board. This is the §3.1 *Simulator* interface in its
+        sharpest form -- intervene on the world, observe the consequence -- and it
+        localises *causal* structure (which piece the tactic actually hinges on),
+        which a forward forcing line leaves implicit. Verifiable by construction:
+        the counterfactual board is legal and the new line really exists or not."""
+        t0 = time.time()
+        anchor = fen or self.anchor_fen
+        board = chess.Board(anchor)
+        sq = chess.parse_square(remove_square)
+        removed = board.piece_at(sq)
+        if removed is None:
+            text = (f"Counterfactual on [{anchor}]: no piece on {remove_square}; "
+                    f"the intervention is vacuous (scene unchanged).")
+            frame_paths, _ = _render_frames(board, [], out_dir)
+            return Rollout(query=f"remove {remove_square}", frame_paths=frame_paths,
+                           beats=[""], seconds=round(time.time() - t0, 2),
+                           module=self.module, text=text)
+        if removed.piece_type == chess.KING:
+            text = (f"Counterfactual on [{anchor}]: removing the king on "
+                    f"{remove_square} is not a legal intervention.")
+            frame_paths, _ = _render_frames(board, [], out_dir)
+            return Rollout(query=f"remove {remove_square}", frame_paths=frame_paths,
+                           beats=[""], seconds=round(time.time() - t0, 2),
+                           module=self.module, text=text)
+        board.remove_piece_at(sq)
+        line, verdict = self._line(board)
+        if not line:
+            best = next(iter(board.legal_moves), None)
+            line = [best] if best else []
+        frame_paths, san_line = _render_frames(board, line, out_dir)
+        first_san = san_line.split(" ")[0] if san_line else "(none)"
+        text = (f"Counterfactual rollout: with the {chess.piece_name(removed.piece_type)} "
+                f"on {remove_square} removed from [{anchor}], {verdict}. "
+                f"Resulting line: {san_line}. Decisive first move now {first_san}.")
+        return Rollout(query=f"remove {remove_square}", frame_paths=frame_paths,
+                       beats=[san_line], seconds=round(time.time() - t0, 2),
+                       module=self.module, text=text)
+
+
+def critical_defender(fen: str, solution_uci: list[str],
+                      engine_path: str | None = None) -> str | None:
+    """Find the enemy piece whose *removal* most changes the tactic -- the square
+    a counterfactual rollout should probe. We look for an enemy piece such that
+    deleting it turns the position into an immediate mate for the side to move
+    (the classic 'if only that defender were gone' intuition). Returns a square
+    name (e.g. 'e5') or None. Pure python-chess; no engine required."""
+    board = chess.Board(fen)
+    mover = board.turn
+    for sq in chess.SQUARES:
+        pc = board.piece_at(sq)
+        if pc is None or pc.color == mover or pc.piece_type == chess.KING:
+            continue
+        b2 = board.copy()
+        b2.remove_piece_at(sq)
+        if mating_first_moves(b2, 1):           # removal enables an immediate mate
+            return chess.square_name(sq)
+    return None
+
 
 def chess_perceive(frame_paths: list[str], query: str) -> str:
     """Perception for the chess world-module: read the ASCII board frames back.

@@ -9,9 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import chess
 
-from ewm.chess_world import (ChessWorldModule, chess_perceive,
+from ewm.chess_world import (ChessWorldModule, chess_perceive, critical_defender,
                              forced_mate_line, mating_first_moves)
 from ewm.chess_data import material_balance, verify
+
+# Back-rank: White Re1/Kg1; Black Kg8 boxed by f7/g7/h7; a Black rook on d8 is the
+# ONLY defender of the back rank -- remove it and Re8 is mate in 1.
+BACKRANK = "3r2k1/5ppp/8/8/8/8/8/4R1K1 w - - 0 1"
 
 
 # Scholar's mate position: White to move, Qxf7# is mate in 1.
@@ -62,3 +66,31 @@ def test_rollout_is_text_only_and_faithful():
     assert all(p.endswith(".txt") for p in roll.frame_paths)  # no images -> no VLM
     obs = chess_perceive(roll.frame_paths, "")
     assert "#" in obs or "mate" in roll.text.lower()  # the mate is exposed
+
+
+# ---- counterfactual / intervention rollout (borrowed from VOID) -------------
+def test_critical_defender_finds_backrank_guard():
+    # no immediate mate while the d8 rook defends...
+    assert not mating_first_moves(chess.Board(BACKRANK), 1)
+    # ...and the intervention square is exactly that defender.
+    assert critical_defender(BACKRANK, ["e1e8"]) == "d8"
+
+
+def test_counterfactual_removal_enables_the_mate():
+    import chess as _c
+    b = _c.Board(BACKRANK)
+    b.remove_piece_at(_c.parse_square("d8"))
+    assert any(m.uci() == "e1e8" for m in mating_first_moves(b, 1))  # Re8# now mate
+
+
+def test_counterfactual_rollout_text_is_inspectable():
+    W = ChessWorldModule(anchor_fen=BACKRANK)
+    roll = W.counterfactual_rollout(Path("runs/test_chess/cf_00"), "d8")
+    assert "counterfactual" in roll.text.lower() and "d8" in roll.text
+    assert all(p.endswith(".txt") for p in roll.frame_paths)
+
+
+def test_counterfactual_vacuous_and_illegal_interventions():
+    W = ChessWorldModule(anchor_fen=BACKRANK)
+    assert "vacuous" in W.counterfactual_rollout(Path("runs/test_chess/cf_e"), "a3").text
+    assert "not a legal" in W.counterfactual_rollout(Path("runs/test_chess/cf_k"), "g8").text
