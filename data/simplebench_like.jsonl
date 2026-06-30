@@ -1,0 +1,4 @@
+{"id": "balls-juggler", "needs_visual": true, "problem": "A juggler throws a solid blue ball a metre in the air and then a solid purple ball (of the same size) two metres in the air. She then climbs to the top of a tall ladder carefully, balancing a yellow balloon on her head. Where is the purple ball most likely now, in relation to the blue ball?", "answer": "At roughly the same place as the blue ball (both on the ground)"}
+{"id": "ice-in-pan", "needs_visual": true, "problem": "A small ice cube is placed in the centre of a dry steel frying pan, and the pan is set on a hot stove and left for ten minutes. Where is the water from the ice cube most likely to be at the end?", "answer": "Gone (evaporated)"}
+{"id": "capital-france", "needs_visual": false, "problem": "What is the capital of France?", "answer": "Paris"}
+{"id": "arith", "needs_visual": false, "problem": "What is 17 + 26?", "answer": "43"}

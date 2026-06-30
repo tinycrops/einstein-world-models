@@ -1,0 +1,15 @@
+.venv*/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Generated experiment outputs and model adapters.
+runs/
+
+# Local working context, not public project documentation.
+CLAUDE.md
+
+# Common local clutter.
+.env
+.env.*
+*.log
